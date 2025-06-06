@@ -1,0 +1,11 @@
+# Python bytecode and cache
+__pycache__/
+*.pyc
+
+# Output and temp files
+output/
+temp_run.py
+breakpoints.tmp
+
+# IDE or tool-specific configuration
+snakeide.conf
