@@ -17,3 +17,7 @@ Heres an image of Snake-IDE
 |Custom Themes| No|
 |Plugin Support| No|
 
+<h1>Installation</h1>
+
+You can either go to [releases](https://github.com/H1387Lmao/Snake-IDE/releases/latest)
+or download and run `snakeIDEInstaller.ps1`
