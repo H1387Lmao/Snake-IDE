@@ -23,7 +23,6 @@ from PySide6.QtCore import (
 	QPoint
 )
 from PySide6.QtSvg import QSvgRenderer
-
 from highlighter import PythonHighlighter
 from core import *
 import json
@@ -43,6 +42,18 @@ def fix_qss_paths(qss: str) -> str:
 		caret_right=path("caret-right.svg"),
 		caret_down=path("caret-down.svg")
 	)
+
+def get_python_executable():
+	if getattr(sys, 'frozen', False):
+		# We're in a PyInstaller-built executable
+		# Try to find a real Python interpreter
+		python = shutil.which("python")
+		if not python:
+			python = shutil.which("python3")
+		return python or "python"  # fallback to plain string if all else fails
+	else:
+		# Normal Python run
+		return sys.executable
 
 class CommandPalette(QDialog):
 	def __init__(self, parent=None):
@@ -719,7 +730,7 @@ class snakeideEditor(QMainWindow):
 			file_path = current_editor.file_path
 
 			self.building_label.show()
-			self.run_command(sys.executable, (file_path,))
+			self.run_command(get_python_executable(), (file_path,))
 
 	def _create_menus(self):
 		menu_bar = self.menuBar()
@@ -865,7 +876,7 @@ class snakeideEditor(QMainWindow):
 				f.write(modified_code)
 			
 			# Run the modified file
-			self.console_process.start_build(sys.executable, [temp_file])
+			self.console_process.start_build(get_python_executable(), [temp_file])
 			return
 		else:
 			self.build_file()
