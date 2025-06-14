@@ -44,6 +44,9 @@ if (Test-Path $zipPath) {
     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath
 }
 
+Expand-Archive -Path $zipPath -DestinationPath $scriptDir -Force
+Remove-Item $zipPath
+
 # Locate snakeide.exe
 $exePath = Get-ChildItem -Path $scriptDir -Recurse -Filter "snakeide.exe" | Select-Object -First 1
 if (-not $exePath) {
