@@ -719,7 +719,7 @@ class snakeideEditor(QMainWindow):
 			file_path = current_editor.file_path
 
 			self.building_label.show()
-			self.run_command("python", (file_path,))
+			self.run_command(sys.executable, (file_path,))
 
 	def _create_menus(self):
 		menu_bar = self.menuBar()
@@ -865,7 +865,7 @@ class snakeideEditor(QMainWindow):
 				f.write(modified_code)
 			
 			# Run the modified file
-			self.console_process.start_build('python', [temp_file])
+			self.console_process.start_build(sys.executable, [temp_file])
 			return
 		else:
 			self.build_file()
