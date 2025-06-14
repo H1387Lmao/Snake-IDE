@@ -20,4 +20,4 @@ Heres an image of Snake-IDE
 <h1>Installation</h1>
 
 You can either go to [releases](https://github.com/H1387Lmao/Snake-IDE/releases/latest)
-or download and run `snakeIDEInstaller.ps1`
+~~or download and run `snakeIDEInstaller.ps1`~~ (DEPRECATED
