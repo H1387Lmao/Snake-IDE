@@ -11,11 +11,11 @@ from PySide6.QtWidgets import (
 	QToolBar, QLabel, QFrame, QVBoxLayout, QWidget, QHBoxLayout, 
 	QTabWidget, QTabBar, QPushButton, QScrollBar, QDialog,
 	QLineEdit, QDialogButtonBox, QInputDialog,
-	QFileIconProvider
+	QFileIconProvider, QCheckBox, QListWidget, QListWidgetItem
 )
 from PySide6.QtGui import (
 	QFont, QKeyEvent, QKeySequence, QPalette, QColor, QAction, QIcon, QPixmap, QPainter, QShortcut,
-	QSyntaxHighlighter, QTextCharFormat, QFontMetrics, QTextCursor
+	QSyntaxHighlighter, QTextCharFormat, QFontMetrics, QTextCursor, QTextDocument
 )
 from PySide6.QtCore import (
 	QFileInfo, Qt, QModelIndex, QSize, QRect,
@@ -27,8 +27,6 @@ from highlighter import PythonHighlighter
 from core import *
 import json
 
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QLineEdit, QListWidget, QListWidgetItem
-from PySide6.QtCore import Qt
 
 def resource_path(relative):
 	return os.path.join(getattr(sys, '_MEIPASS', os.path.abspath(".")), relative).replace("\\", "/")
@@ -55,6 +53,37 @@ def get_python_executable():
 		# Normal Python run
 		return sys.executable
 
+class FindDialog(QDialog):
+	def __init__(self, parent=None):
+		super().__init__(parent)
+		self.setWindowTitle("Find")
+		self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+		
+		layout = QVBoxLayout(self)
+		self.search_input = QLineEdit(self)
+		self.search_input.setPlaceholderText("Enter text to find")
+		layout.addWidget(self.search_input)
+		
+		self.case_cb = QCheckBox("Case sensitive", self)
+		layout.addWidget(self.case_cb)
+		
+		btn_layout = QVBoxLayout()
+		self.next_btn = QPushButton("Find Next", self)
+		self.prev_btn = QPushButton("Find Previous", self)
+		btn_layout.addWidget(self.next_btn)
+		btn_layout.addWidget(self.prev_btn)
+		layout.addLayout(btn_layout)
+		
+		# signals
+		self.next_btn.clicked.connect(lambda: self.parent().find_next(
+			self.search_input.text(),
+			self.case_cb.isChecked()
+		))
+		self.prev_btn.clicked.connect(lambda: self.parent().find_previous(
+			self.search_input.text(),
+			self.case_cb.isChecked()
+		))
+
 class CommandPalette(QDialog):
 	def __init__(self, parent=None):
 		super().__init__(parent)
@@ -62,10 +91,10 @@ class CommandPalette(QDialog):
 			Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
 		)
 		self.setAttribute(Qt.WA_TranslucentBackground)
-		self.setFixedWidth(parent.width() * 0.8)  # 80% width of parent window
+		self.setFixedWidth(parent.width() * 0.8)
 		self.move(
 			parent.x() + parent.width() * 0.1,
-			parent.y() + 10  # 10 px from top of main window
+			parent.y() + 10
 		)
 
 		layout = QVBoxLayout(self)
@@ -79,39 +108,76 @@ class CommandPalette(QDialog):
 		layout.addWidget(self.list_widget)
 		self.list_widget.setObjectName("CommandPaletteList")
 
-		# Example commands
-		self.commands = ["Build File", "Debug File"]
+		# Commands
+		self.IDE = parent
+		self.commands = [
+			"Build File",
+			"Debug File",
+			"Convert Tabs to Spaces",
+			"Convert Spaces to Tabs",
+			"Find"
+		]
 		self.update_list("")
 
+		# When user types and presses Enter, always execute the currently highlighted list item
+		self.input.returnPressed.connect(self.execute_current)
 		self.input.textChanged.connect(self.update_list)
-		self.input.returnPressed.connect(self.execute_command)
-		self.IDE = parent
+		self.list_widget.itemActivated.connect(self.execute_current)
 
 	def update_list(self, filter_text):
 		self.list_widget.clear()
 		filtered = [cmd for cmd in self.commands if filter_text.lower() in cmd.lower()]
 		for cmd in filtered:
 			self.list_widget.addItem(QListWidgetItem(cmd))
-		if filtered:
+		# Select the first item by default
+		if self.list_widget.count() > 0:
 			self.list_widget.setCurrentRow(0)
 
-	def execute_command(self):
-		current = self.list_widget.currentItem()
-		if current:
-			if current.text() == "Build File":
-				if self.IDE is not None:
-					self.IDE.build_file()
-			elif current.text() == "Debug File":
-				if self.IDE is not None:
-					self.IDE.debug_run()
+	def execute_current(self):
+		current_item = self.list_widget.currentItem()
+		if current_item is None:
 			self.hide()
 			return
-		s=self.input.text().split(" ")
-		if len(s)>1:
-			cmdlet, args = s[0].strip(), s[1:]
-		else:
-			cmdlet, args = self.input.text().strip(), []
 		self.hide()
+		cmd = current_item.text()
+		editor = self.IDE.get_current_editor()
+		ts = getattr(self.IDE, 'tab_size', getattr(self.IDE, '_tab_size', 4))
+
+		# 1) Save state
+		cur = editor.textCursor()
+		saved_pos = cur.position()
+		v_scroll = editor.verticalScrollBar().value()
+		h_scroll = editor.horizontalScrollBar().value()
+
+		new_text = None
+
+		full_text = editor.toPlainText()
+		if cmd == "Build File":
+			self.IDE.build_file()
+		elif cmd == "Debug File":
+			self.IDE.debug_run()
+		elif cmd == "Find":
+			self.IDE.show_find()
+		elif cmd == "Convert Tabs to Spaces":
+			new_text = full_text.replace("\t", " " * ts)
+		elif cmd == "Convert Spaces to Tabs":
+			new_text = full_text.replace(" " * ts, "\t")
+
+		if new_text is not None:
+			# 2) Replace
+			editor.setPlainText(new_text)
+
+			# 3) Restore cursor
+			new_cursor = editor.textCursor()
+			new_cursor.setPosition(min(saved_pos, len(new_text)))
+			editor.setTextCursor(new_cursor)
+
+			# 4) Restore scrollbars
+			editor.verticalScrollBar().setValue(v_scroll)
+			editor.horizontalScrollBar().setValue(h_scroll)
+
+		
+
 
 	def keyPressEvent(self, event):
 		if event.key() == Qt.Key_Escape:
@@ -287,60 +353,30 @@ class LineNumberArea(QWidget):
 class CodeEditor(QPlainTextEdit):
 	def __init__(self, parent=None):
 		super().__init__(parent)
+		# Editor font
 		self.efont = QFont("Cascadia Mono")
-		self.efont.setPointSize(13) 
+		self.efont.setPointSize(13)
 		self.efont.setStyleStrategy(QFont.StyleStrategy.PreferMatch)
 		self.efont.setWeight(QFont.Weight.DemiBold)
 		self.efont.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
-		self.breakpoints = set()
 		self.setFont(self.efont)
+
+		# Whitespace markers
+		self.space_symbol = '·'  # U+00B7
+		self.tab_symbol   = '»'  # U+00BB
+		self.symbol_color = QColor('gray')
+
+		# Breakpoints
+		self.breakpoints = set()
+		# Line number area
 		self.line_number_area = LineNumberArea(self)
 		self.blockCountChanged.connect(self.update_line_number_area_width)
 		self.updateRequest.connect(self.update_line_number_area)
-		self.update_line_number_area_width()
-		self.paired_chars = {
-			'(': ')',
-			'[': ']',
-			'{': '}',
-			'"': '"',
-			"'": "'"
-		}
 		self.cursorPositionChanged.connect(self.highlight_current_line)
-	def keyPressEvent(self, event: QKeyEvent):
-		cursor = self.textCursor()
-		key = event.key()
-		text = event.text()
+		self.update_line_number_area_width()
 
-		# Handle auto-pairing
-		if text in self.paired_chars:
-			closing_char = self.paired_chars[text]
-			cursor.insertText(text + closing_char)
-			cursor.movePosition(QTextCursor.Left)
-			self.setTextCursor(cursor)
-			return
-
-		# Handle skipping over existing closing character
-		elif text in self.paired_chars.values():
-			next_char = self._next_char_right(cursor)
-			if next_char == text:
-				cursor.movePosition(QTextCursor.Right)
-				self.setTextCursor(cursor)
-				return
-		elif key == Qt.Key.Key_Backspace:
-			current_character = self._next_char_left(cursor)
-			next_char = self._next_char_right(cursor)
-
-			if current_character in self.paired_chars:
-				if self.paired_chars[current_character] == next_char:
-					cursor.movePosition(QTextCursor.Right)
-					cursor.movePosition(QTextCursor.Left, QTextCursor.KeepAnchor)
-					cursor.movePosition(QTextCursor.Left, QTextCursor.KeepAnchor)
-					cursor.removeSelectedText()
-					self.setTextCursor(cursor)
-					return
-
-		# Default behavior
-		super().keyPressEvent(event)
+		# Auto-pairing
+		self.paired_chars = {'(': ')', '[': ']', '{': '}', '"': '"', "'": "'"}
 
 	def line_number_area_width(self):
 		digits = len(str(max(1, self.blockCount())))
@@ -355,79 +391,142 @@ class CodeEditor(QPlainTextEdit):
 			self.line_number_area.scroll(0, dy)
 		else:
 			self.line_number_area.update(0, rect.y(), self.line_number_area.width(), rect.height())
-		
 		if rect.contains(self.viewport().rect()):
 			self.update_line_number_area_width()
 
 	def resizeEvent(self, event):
 		super().resizeEvent(event)
 		cr = self.contentsRect()
-		self.line_number_area.setGeometry(QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height()))
+		self.line_number_area.setGeometry(
+			QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height())
+		)
+
+	def paintEvent(self, event):
+		super().paintEvent(event)
+		# Only draw markers when text is selected
+		cursor = self.textCursor()
+		sel_start = cursor.selectionStart()
+		sel_end = cursor.selectionEnd()
+		if sel_start == sel_end:
+			return
+
+		painter = QPainter(self.viewport())
+		painter.setPen(self.symbol_color)
+		metrics = self.fontMetrics()
+		tab_width = self.tabStopDistance()
+		block = self.firstVisibleBlock()
+		offset = self.contentOffset()
+		vis_rect = self.viewport().rect()
+
+		while block.isValid():
+			block_geom = self.blockBoundingGeometry(block).translated(offset)
+			if block_geom.bottom() < vis_rect.top():
+				block = block.next()
+				continue
+			if block_geom.top() > vis_rect.bottom():
+				break
+
+			text = block.text()
+			block_pos = block.position()
+			for i, ch in enumerate(text):
+				if ch in (' ', '\t'):
+					doc_index = block_pos + i
+					if not (sel_start <= doc_index < sel_end):
+						continue
+					# calculate x offset
+					x_offset = 0.0
+					for c in text[:i]:
+						x_offset += tab_width if c == '\t' else metrics.horizontalAdvance(c)
+					x = int(block_geom.left() + x_offset)
+					symbol = self.space_symbol if ch == ' ' else self.tab_symbol
+					painter.drawText(
+						QRect(x, block_geom.top(), metrics.horizontalAdvance(symbol), metrics.height()),
+						Qt.AlignLeft, symbol
+					)
+			block = block.next()
+
+	def keyPressEvent(self, event):
+		cursor = self.textCursor()
+		key, text = event.key(), event.text()
+		if text in self.paired_chars:
+			cursor.insertText(text + self.paired_chars[text])
+			cursor.movePosition(QTextCursor.Left)
+			self.setTextCursor(cursor)
+			return
+		if text in self.paired_chars.values() and self._next_char_right(cursor) == text:
+			cursor.movePosition(QTextCursor.Right)
+			self.setTextCursor(cursor)
+			return
+		if key == Qt.Key_Backspace:
+			left = self._next_char_left(cursor)
+			right = self._next_char_right(cursor)
+			if left in self.paired_chars and self.paired_chars[left] == right:
+				cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor)
+				cursor.movePosition(QTextCursor.Left, QTextCursor.KeepAnchor)
+				cursor.removeSelectedText()
+				self.setTextCursor(cursor)
+				return
+		super().keyPressEvent(event)
+
 	def _next_char_right(self, cursor):
 		cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor)
-		next_char = cursor.selectedText()
+		ch = cursor.selectedText()
 		cursor.movePosition(QTextCursor.Left)
-		return next_char
+		return ch
+
 	def _next_char_left(self, cursor):
 		cursor.movePosition(QTextCursor.Left, QTextCursor.KeepAnchor)
-		next_char = cursor.selectedText()
+		ch = cursor.selectedText()
 		cursor.movePosition(QTextCursor.Right)
-		return next_char
+		return ch
+
 	def highlight_current_line(self):
-		pass
-	def toggle_breakpoint(self, line_number):
-		"""Toggle breakpoint at given line number"""
-		if line_number in self.breakpoints:
-			self.breakpoints.remove(line_number)
+		extra = QTextEdit.ExtraSelection()
+		extra.format.setBackground(QColor("#2A2A2A"))
+		extra.format.setProperty(QTextCharFormat.FullWidthSelection, True)
+		extra.cursor = self.textCursor()
+		extra.cursor.clearSelection()
+		self.setExtraSelections([extra])
+
+	def toggle_breakpoint(self, line):
+		if line in self.breakpoints:
+			self.breakpoints.remove(line)
 		else:
-			self.breakpoints.add(line_number)
+			self.breakpoints.add(line)
 		self.line_number_area.update()
 
 	def get_breakpoints(self):
-		"""Return sorted list of breakpoint line numbers"""
 		return sorted(self.breakpoints)
 
 	def line_number_area_paint_event(self, event):
 		painter = QPainter(self.line_number_area)
-		# Use Snake IDE theme colors for line numbers
-		painter.fillRect(event.rect(), QColor("#3C3F41"))  # Background color
-		
+		painter.fillRect(event.rect(), QColor("#3C3F41"))
 		block = self.firstVisibleBlock()
-		block_number = block.blockNumber()
+		cur_line = self.textCursor().blockNumber()
 		top = self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
 		bottom = top + self.blockBoundingRect(block).height()
-
-		# Get current line to highlight it
-		current_line = self.textCursor().blockNumber()
-
-		breakpoint_icon = QSvgRenderer(resource_path("./icons/breakpoint.svg"))
-		icon_height = 14
-		
-		# Draw breakpoints and line numbers
-		radius = 4
+		num = block.blockNumber()
+		icon = QSvgRenderer(resource_path("icons/breakpoint.svg"))
+		icon_size = 14
 		while block.isValid() and top <= event.rect().bottom():
 			if block.isVisible() and bottom >= event.rect().top():
-				# Highlight current line
-				if block_number == current_line:
-					painter.fillRect(0, int(top), self.line_number_area.width(), 
-									int(bottom - top), QColor("#4C5052"))
-				
-				# Draw breakpoint if set
-				if block_number in self.breakpoints:
-					x = 0
-					y = math.floor(top + (bottom - top - icon_height) / 2)
-					breakpoint_icon.render(painter, QRect(x,y, 14,14))
-				
-				# Draw line number text
-				painter.setPen(QColor("#A9B7C6"))  # Snake IDE text color
-				painter.drawText(0, int(top), self.line_number_area.width() - 3, 
-								self.fontMetrics().height(),
-								Qt.AlignRight, str(block_number + 1))
-			
+				if num == cur_line:
+					painter.fillRect(0, int(top), self.line_number_area.width(),
+									 int(bottom - top), QColor("#4C5052"))
+				if num in self.breakpoints:
+					y = math.floor(top + (bottom - top - icon_size) / 2)
+					icon.render(painter, QRect(0, y, icon_size, icon_size))
+				painter.setPen(QColor("#A9B7C6"))
+				painter.drawText(
+					0, int(top), self.line_number_area.width() - 3,
+								 self.fontMetrics().height(), Qt.AlignRight,
+								 str(num + 1)
+				)
 			block = block.next()
 			top = bottom
 			bottom = top + self.blockBoundingRect(block).height()
-			block_number += 1
+			num += 1
+
 
 class snakeideEditor(QMainWindow):
 	def __init__(self):
@@ -435,6 +534,8 @@ class snakeideEditor(QMainWindow):
 		self.setWindowTitle("Snake IDE V1")
 		self.resize(1500,1500)
 		self.showMaximized()
+
+		self.find_dialog = None
 		self._tab_size = 4
 		self._current_file = None
 		self.default_Config = {"tab_size": 4, "current_project": None, "current_file": None, "open_files": []}
@@ -474,6 +575,47 @@ class snakeideEditor(QMainWindow):
 
 		self._tab_size = self.config.get("tab_size", 4)
 		self.set_tab_size(self._tab_size)
+
+	def show_find(self):
+		if self.find_dialog is None:
+			self.find_dialog = FindDialog(self)
+		self.find_dialog.show()
+		self.find_dialog.raise_()
+		self.find_dialog.search_input.setFocus()
+
+	def find_next(self, text, case_sensitive=False):
+		editor = self.get_current_editor()
+		if not text:
+			return
+		flags = QTextDocument.FindFlags()
+		if case_sensitive:
+			flags |= QTextDocument.FindCaseSensitively
+		# start after the current cursor
+		if not editor.find(text, flags):
+			# wrap around
+			cursor = editor.textCursor()
+			cursor.movePosition(QTextCursor.Start)
+			editor.setTextCursor(cursor)
+			if not editor.find(text, flags):
+				self.find_dialog.hide()
+				QMessageBox.information(self, "Find",f"Find: Could not find {text}.")
+				self.find_dialog.show()
+
+	def find_previous(self, text, case_sensitive=False):
+		editor = self.get_current_editor()
+		if not text:
+			return
+		flags = QTextDocument.FindBackward
+		if case_sensitive:
+			flags |= QTextDocument.FindCaseSensitively
+		# start before the current cursor
+		if not editor.find(text, flags):
+			# wrap around
+			cursor = editor.textCursor()
+			cursor.movePosition(QTextCursor.End)
+			editor.setTextCursor(cursor)
+			if not editor.find(text, flags):
+				QMessageBox.information(self, "Find", f"‘{text}’ not found.")
 
 	def open_command_palette(self):
 		if not hasattr(self, 'command_palette'):
@@ -1548,7 +1690,7 @@ class FileIconProvider(QFileIconProvider):
 
 if __name__ == '__main__':
 	app = QApplication(sys.argv)
-	app.setApplicationName("Snake IDE")    
+	app.setApplicationName("Snake IDE")	
 	window = snakeideEditor()
 	window.show()
 	
