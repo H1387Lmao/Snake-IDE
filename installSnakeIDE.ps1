@@ -44,6 +44,25 @@ if (Test-Path $zipPath) {
     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath
 }
 
+# Search for existing snakeide.exe in script folder
+$existingInstall = Get-ChildItem -Path $scriptDir -Recurse -Filter "snakeide.exe" | Select-Object -First 1
+
+if ($existingInstall) {
+    Write-Host "⚠️ Existing SnakeIDE installation detected at:"
+    Write-Host "   $($existingInstall.DirectoryName)"
+    
+    $confirm = Read-Host "Do you want to delete the existing installation? (Y/N)"
+    
+    if ($confirm -match '^(Y|y)$') {
+        Write-Host "Deleting old installation..."
+        Remove-Item -Path $existingInstall.Directory -Recurse -Force
+    } else {
+        Write-Host "Installation aborted."
+        exit
+    }
+}
+
+
 Expand-Archive -Path $zipPath -DestinationPath $scriptDir -Force
 Remove-Item $zipPath
 
